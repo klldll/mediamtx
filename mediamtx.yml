@@ -494,6 +494,8 @@ pathDefaults:
 
   # Enable always-available mode, in which a offline segment is played on repeat when the stream is not available.
   alwaysAvailable: false
+  # Wait before switching to the offline segment after the stream becomes unavailable.
+  alwaysAvailableSwitchAfter: 0s
   # An MP4 file can be used instead of the default offline segment.
   alwaysAvailableFile: ''
   # Tracks of the default offline segment.

@@ -152,9 +152,10 @@ type Path struct {
 	UseAbsoluteTimestamp       bool     `json:"useAbsoluteTimestamp"`
 
 	// Always available
-	AlwaysAvailable       bool                   `json:"alwaysAvailable"`
-	AlwaysAvailableFile   string                 `json:"alwaysAvailableFile"`
-	AlwaysAvailableTracks []AlwaysAvailableTrack `json:"alwaysAvailableTracks"`
+	AlwaysAvailable            bool                   `json:"alwaysAvailable"`
+	AlwaysAvailableSwitchAfter Duration               `json:"alwaysAvailableSwitchAfter"`
+	AlwaysAvailableFile        string                 `json:"alwaysAvailableFile"`
+	AlwaysAvailableTracks      []AlwaysAvailableTrack `json:"alwaysAvailableTracks"`
 
 	// Record
 	Record                bool         `json:"record"`
@@ -678,6 +679,10 @@ func (pconf *Path) validate(
 	// Always available
 
 	if pconf.AlwaysAvailable {
+		if pconf.AlwaysAvailableSwitchAfter < 0 {
+			return fmt.Errorf("invalid 'alwaysAvailableSwitchAfter' value")
+		}
+
 		if pconf.Regexp != nil {
 			return fmt.Errorf("'alwaysAvailable' cannot be used in a path with a regular expression (or path 'all')")
 		}

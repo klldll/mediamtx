@@ -99,6 +99,7 @@ type path struct {
 	onDemandPublisherState         pathOnDemandState
 	onDemandPublisherReadyTimer    *time.Timer
 	onDemandPublisherCloseTimer    *time.Timer
+	alwaysAvailableOfflineTimer    *time.Timer
 
 	// in
 	chReloadConf              chan *conf.Path
@@ -125,6 +126,7 @@ func (pa *path) initialize() {
 	pa.onDemandStaticSourceCloseTimer = emptyTimer()
 	pa.onDemandPublisherReadyTimer = emptyTimer()
 	pa.onDemandPublisherCloseTimer = emptyTimer()
+	pa.alwaysAvailableOfflineTimer = emptyTimer()
 	pa.chReloadConf = make(chan *conf.Path)
 	pa.chStaticSourceSetReady = make(chan defs.PathSourceStaticSetReadyReq)
 	pa.chStaticSourceSetNotReady = make(chan defs.PathSourceStaticSetNotReadyReq)
@@ -218,6 +220,7 @@ func (pa *path) run() {
 	pa.onDemandStaticSourceCloseTimer.Stop()
 	pa.onDemandPublisherReadyTimer.Stop()
 	pa.onDemandPublisherCloseTimer.Stop()
+	pa.alwaysAvailableOfflineTimer.Stop()
 
 	onUnInitHook()
 
@@ -276,6 +279,9 @@ func (pa *path) runInner() error {
 
 		case <-pa.onDemandPublisherCloseTimer.C:
 			pa.doOnDemandPublisherCloseTimer()
+
+		case <-pa.alwaysAvailableOfflineTimer.C:
+			pa.doAlwaysAvailableOfflineTimer()
 
 		case newConf := <-pa.chReloadConf:
 			pa.doReloadConf(newConf)
@@ -366,6 +372,10 @@ func (pa *path) doOnDemandPublisherCloseTimer() {
 	pa.onDemandPublisherStop("not needed by anyone")
 }
 
+func (pa *path) doAlwaysAvailableOfflineTimer() {
+	pa.startAlwaysAvailableOfflineSubStream()
+}
+
 func (pa *path) doReloadConf(newConf *conf.Path) {
 	pa.confMutex.Lock()
 	oldConf := pa.conf
@@ -417,6 +427,7 @@ func (pa *path) doSourceStaticSetReady(req defs.PathSourceStaticSetReadyReq) {
 
 	if pa.conf.AlwaysAvailable {
 		pa.onlineTime = time.Now()
+		pa.cancelAlwaysAvailableOfflineSubStream()
 	}
 
 	if pa.conf.HasOnDemandStaticSource() {
@@ -434,10 +445,7 @@ func (pa *path) doSourceStaticSetNotReady(req defs.PathSourceStaticSetNotReadyRe
 	if !pa.conf.AlwaysAvailable {
 		pa.setNotAvailable()
 	} else {
-		err := pa.stream.StartOfflineSubStream()
-		if err != nil {
-			panic("should not happen")
-		}
+		pa.scheduleAlwaysAvailableOfflineSubStream()
 	}
 
 	// send response before calling onDemandStaticSourceStop()
@@ -544,6 +552,7 @@ func (pa *path) doAddPublisher(req defs.PathAddPublisherReq) {
 
 	if pa.conf.AlwaysAvailable {
 		pa.onlineTime = time.Now()
+		pa.cancelAlwaysAvailableOfflineSubStream()
 	}
 
 	if pa.conf.HasOnDemandPublisher() && pa.onDemandPublisherState != pathOnDemandStateInitial {
@@ -765,14 +774,15 @@ func (pa *path) onDemandPublisherStop(reason string) {
 
 func (pa *path) setAvailable(desc *description.Session, replaceNTP bool) error {
 	pa.stream = &stream.Stream{
-		Desc:                  desc,
-		AlwaysAvailable:       pa.conf.AlwaysAvailable,
-		AlwaysAvailableFile:   pa.conf.AlwaysAvailableFile,
-		AlwaysAvailableTracks: pa.conf.AlwaysAvailableTracks,
-		WriteQueueSize:        pa.writeQueueSize,
-		RTPMaxPayloadSize:     pa.rtpMaxPayloadSize,
-		ReplaceNTP:            replaceNTP,
-		Parent:                pa,
+		Desc:                        desc,
+		AlwaysAvailable:             pa.conf.AlwaysAvailable,
+		AlwaysAvailableFile:         pa.conf.AlwaysAvailableFile,
+		AlwaysAvailableTracks:       pa.conf.AlwaysAvailableTracks,
+		SkipInitialOfflineSubStream: pa.conf.AlwaysAvailable && pa.source == nil && pa.conf.AlwaysAvailableSwitchAfter > 0,
+		WriteQueueSize:              pa.writeQueueSize,
+		RTPMaxPayloadSize:           pa.rtpMaxPayloadSize,
+		ReplaceNTP:                  replaceNTP,
+		Parent:                      pa,
 	}
 	err := pa.stream.Initialize()
 	if err != nil {
@@ -900,12 +910,35 @@ func (pa *path) executeRemovePublisher() {
 	if !pa.conf.AlwaysAvailable {
 		pa.setNotAvailable()
 	} else {
-		err := pa.stream.StartOfflineSubStream()
-		if err != nil {
-			panic("should not happen")
-		}
+		pa.scheduleAlwaysAvailableOfflineSubStream()
 	}
 	pa.source = nil
+}
+
+func (pa *path) cancelAlwaysAvailableOfflineSubStream() {
+	pa.alwaysAvailableOfflineTimer.Stop()
+	pa.alwaysAvailableOfflineTimer = emptyTimer()
+}
+
+func (pa *path) startAlwaysAvailableOfflineSubStream() {
+	if pa.stream == nil || pa.stream.HasOfflineSubStream() {
+		return
+	}
+
+	err := pa.stream.StartOfflineSubStreamNow()
+	if err != nil {
+		panic("should not happen")
+	}
+}
+
+func (pa *path) scheduleAlwaysAvailableOfflineSubStream() {
+	if pa.conf.AlwaysAvailableSwitchAfter == 0 {
+		pa.startAlwaysAvailableOfflineSubStream()
+		return
+	}
+
+	pa.alwaysAvailableOfflineTimer.Stop()
+	pa.alwaysAvailableOfflineTimer = time.NewTimer(time.Duration(pa.conf.AlwaysAvailableSwitchAfter))
 }
 
 func (pa *path) addReaderPost(req defs.PathAddReaderReq) {
