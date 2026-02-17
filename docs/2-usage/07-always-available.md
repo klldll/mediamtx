@@ -26,3 +26,14 @@ paths:
     alwaysAvailable: true
     alwaysAvailableFile: "./h264.mp4"
 ```
+
+You can delay the switch to the offline segment by setting `alwaysAvailableSwitchAfter`:
+
+```yml
+paths:
+  mypath:
+    alwaysAvailable: true
+    alwaysAvailableSwitchAfter: 5s
+```
+
+To build text/image placeholders, generate an MP4 file from your text or image and point `alwaysAvailableFile` to it.

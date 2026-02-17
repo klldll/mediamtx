@@ -214,14 +214,15 @@ func mediasFromAlwaysAvailableTracks(alwaysAvailableTracks []conf.AlwaysAvailabl
 // Stream is a media stream.
 // It stores tracks, readers and allows to write data to readers, remuxing it when needed.
 type Stream struct {
-	Desc                  *description.Session
-	AlwaysAvailable       bool
-	AlwaysAvailableFile   string
-	AlwaysAvailableTracks []conf.AlwaysAvailableTrack
-	WriteQueueSize        int
-	RTPMaxPayloadSize     int
-	ReplaceNTP            bool
-	Parent                logger.Writer
+	Desc                        *description.Session
+	AlwaysAvailable             bool
+	AlwaysAvailableFile         string
+	AlwaysAvailableTracks       []conf.AlwaysAvailableTrack
+	SkipInitialOfflineSubStream bool
+	WriteQueueSize              int
+	RTPMaxPayloadSize           int
+	ReplaceNTP                  bool
+	Parent                      logger.Writer
 
 	mutex            sync.RWMutex
 	subStream        *SubStream
@@ -300,8 +301,8 @@ func (s *Stream) Initialize() error {
 		s.medias[media] = sm
 	}
 
-	if s.AlwaysAvailable {
-		err := s.StartOfflineSubStream()
+	if s.AlwaysAvailable && !s.SkipInitialOfflineSubStream {
+		err := s.StartOfflineSubStreamNow()
 		if err != nil {
 			return err
 		}
@@ -326,8 +327,8 @@ func (s *Stream) Close() {
 	}
 }
 
-// StartOfflineSubStream starts the offline substream.
-func (s *Stream) StartOfflineSubStream() error {
+// StartOfflineSubStreamNow starts the offline substream.
+func (s *Stream) StartOfflineSubStreamNow() error {
 	if !s.AlwaysAvailable {
 		panic("should not happen")
 	}
@@ -347,6 +348,13 @@ func (s *Stream) StartOfflineSubStream() error {
 	s.offlineSubStream = oss
 
 	return nil
+}
+
+// HasOfflineSubStream reports whether the stream is currently offline.
+func (s *Stream) HasOfflineSubStream() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.offlineSubStream != nil
 }
 
 // BytesReceived returns received bytes.
